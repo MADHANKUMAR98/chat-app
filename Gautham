@@ -1,0 +1,207 @@
+[10/10, 11:29 am] DTCC Gautham: import java.lang.management.ManagementFactory;
+import com.sun.management.OperatingSystemMXBean;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+public class ProcessorInstanceController {
+
+    // Health check endpoint
+    @GetMapping("/healthcheck")
+    public ResponseEntity<String> healthCheck() {
+        return new ResponseEntity<>("OK", HttpStatus.OK);
+    }
+
+    // Resource utilization endpoint
+    @GetMapping("/utilization")
+    public ResourceUtilization getResourceUtilization() {
+        OperatingSystemMXBean osBean = ManagementFactory.getPlatformMXBean(OperatingSystemMXBean.class);
+
+        double cpuLoad = osBean.getSystemCpuLoad() * 100;
+        long freeMemory = osBean.getFreePhysicalMemorySize();
+        long totalMemory = osBean.getTotalPhysicalMemorySize();
+        long usedMemory = totalMemory - freeMemory;
+
+        return new ResourceUtilization(cpuLoad, usedMemory, totalMemory);
+    }
+
+    // Process task endpoint
+    @PostMapping("/process")
+    public ResponseEntity<String> processTask(@RequestBody TaskData taskData) {
+        // Simulate task processing (can be replaced with actual task logic)
+        System.out.println("Processing task: " + taskData.getTaskDescription());
+        return new ResponseEntity<>("Task Processed", HttpStatus.OK);
+    }
+
+    // Utility classes
+    public static class ResourceUtilization {
+        private double cpuLoad;
+        private long usedMemory;
+        private long totalMemory;
+
+        public ResourceUtilization(double cpuLoad, long usedMemory, long totalMemory) {
+            this.cpuLoad = cpuLoad;
+            this.usedMemory = usedMemory;
+            this.totalMemory = totalMemory;
+        }
+
+        public double getCpuLoad() {
+            return cpuLoad;
+        }
+
+        public long getUsedMemory() {
+            return usedMemory;
+        }
+
+        public long getTotalMemory() {
+            return totalMemory;
+        }
+    }
+
+    public static class TaskData {
+        private String taskDescription;
+
+        public String getTaskDescription() {
+            return taskDescription;
+        }
+
+        public void setTaskDescription(String taskDescription) {
+            this.taskDescription = taskDescription;
+        }
+    }
+}
+[10/10, 11:29 am] DTCC Gautham: import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.List;
+import java.util.Map;
+
+@RestController
+public class CoordinatorController {
+
+    private final CoordinatorService coordinatorService;
+
+    public CoordinatorController(CoordinatorService coordinatorService) {
+        this.coordinatorService = coordinatorService;
+    }
+
+    @PostMapping("/distribute")
+    public ResponseEntity<String> distributeTask(@RequestBody CoordinatorService.TaskData taskData) {
+        return coordinatorService.distributeTaskToProcessor(taskData);
+    }
+}
+
+@Service
+class CoordinatorService {
+
+    private final List<String> processorInstances = List.of("http://localhost:8081", "http://localhost:8082"); // Add processor URLs here
+
+    public ResponseEntity<String> distributeTaskToProcessor(TaskData taskData) {
+        RestTemplate restTemplate = new RestTemplate();
+
+        for (String instanceUrl : processorInstances) {
+            // Health check
+            if (isInstanceHealthy(instanceUrl)) {
+                // Get utilization data
+                ResourceUtilization utilization = getInstanceUtilization(instanceUrl);
+
+                // Check if processor is under-utilized
+                if (utilization != null && isInstanceUnderUtilized(utilization)) {
+                    // Send task if under-utilized
+                    return sendTaskToInstance(instanceUrl, taskData);
+                }
+            }
+        }
+
+        return new ResponseEntity<>("No available processor to handle the task", HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    // Check if processor is healthy
+    public boolean isInstanceHealthy(String instanceUrl) {
+        RestTemplate restTemplate = new RestTemplate();
+        try {
+            ResponseEntity<String> response = restTemplate.getForEntity(instanceUrl + "/healthcheck", String.class);
+            return response.getStatusCode().is2xxSuccessful();
+        } catch (Exception e) {
+            System.out.println("Health check failed for " + instanceUrl);
+            return false;
+        }
+    }
+
+    // Get the resource utilization of the processor instance
+    public ResourceUtilization getInstanceUtilization(String instanceUrl) {
+        RestTemplate restTemplate = new RestTemplate();
+        try {
+            ResponseEntity<ResourceUtilization> response = restTemplate.getForEntity(instanceUrl + "/utilization", ResourceUtilization.class);
+            return response.getBody();
+        } catch (Exception e) {
+            System.out.println("Failed to get utilization from " + instanceUrl);
+            return null;
+        }
+    }
+
+    // Check if the instance is under-utilized
+    public boolean isInstanceUnderUtilized(ResourceUtilization utilization) {
+        return utilization.getCpuLoad() < 80; // Check if CPU load is below 80%
+    }
+
+    // Send task to processor instance
+    public ResponseEntity<String> sendTaskToInstance(String instanceUrl, TaskData taskData) {
+        RestTemplate restTemplate = new RestTemplate();
+        try {
+            ResponseEntity<String> response = restTemplate.postForEntity(instanceUrl + "/process", taskData, String.class);
+            return response;
+        } catch (Exception e) {
+            System.out.println("Failed to send task to " + instanceUrl);
+            return new ResponseEntity<>("Task failed to process", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    // Utility classes
+    public static class ResourceUtilization {
+        private double cpuLoad;
+        private long usedMemory;
+        private long totalMemory;
+
+        // Getters and setters
+        public double getCpuLoad() {
+            return cpuLoad;
+        }
+
+        public void setCpuLoad(double cpuLoad) {
+            this.cpuLoad = cpuLoad;
+        }
+
+        public long getUsedMemory() {
+            return usedMemory;
+        }
+
+        public void setUsedMemory(long usedMemory) {
+            this.usedMemory = usedMemory;
+        }
+
+        public long getTotalMemory() {
+            return totalMemory;
+        }
+
+        public void setTotalMemory(long totalMemory) {
+            this.totalMemory = totalMemory;
+        }
+    }
+
+    public static class TaskData {
+        private String taskDescription;
+
+        // Getters and setters
+        public String getTaskDescription() {
+            return taskDescription;
+        }
+
+        public void setTaskDescription(String taskDescription) {
+            this.taskDescription = taskDescription;
+        }
+    }
+}
